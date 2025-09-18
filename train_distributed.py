@@ -175,7 +175,8 @@ def train_loop_fn(config_dict):
     print(f"Worker {rank}/{world_size} - Using device: {device}")
 
     # --- CARICAMENTO E PREPROCESSING DATI (OGNI WORKER CARICA IL FILE) ---
-    stocks_path = os.path.join(config.DATA_DIR, config.STOCKS_FILE)
+    stocks_path = os.path.join(config.DATA_DIR, config.STOCKS_FILE) # per file system locale
+	#stocks_path = "hdfs://user/user/input/sp500_stocks.csv" # per HDFS
     full_stocks_df = pd.read_csv(stocks_path)
     data = full_stocks_df[full_stocks_df['Symbol'].isin(config.STOCKS_TO_ANALYZE)].copy()
     data['Date'] = pd.to_datetime(data['Date'])
