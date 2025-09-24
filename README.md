@@ -52,9 +52,11 @@ An additional test was conducted to evaluate the impact of reading data from HDF
 | Data Source (4 Cores) | Average Time (s) | Difference vs. Local |
 | :-------------------- | :--------------: | :-------------------: |
 | Local File System     |      789.16      |       Baseline        |
-| HDFS (Warm Avg)       |      749.14      |   -5.1% (faster)      |
+| HDFS (Warm Avg)       |      675.12      |   -14.45% (faster)      |
 
-**Analysis:** Surprisingly, once the initial "cold start" was overcome, reading from HDFS was, on average, **5.1% faster**. This result, likely due to optimized caching mechanisms in Hadoop/Java, confirms the solution's full compatibility and efficiency in an end-to-end Big Data environment.
+**Note:** Reading from HDFS was on average **14.45% faster**.  
+This result — likely due to the optimized caching mechanisms of Hadoop/Java — confirms both the full compatibility and the efficiency of the solution in a true end-to-end Big Data environment.
 
-## Conclusions
-The integration of PySpark and PyTorch via `TorchDistributor` proved to be a valid and effective solution for accelerating deep learning model training on multi-core architectures. The results show not only a significant improvement in computational performance but also the preservation of model quality, paving the way for further investigation on multi-node clusters.
+**Conclusions**  
+The integration of PySpark and PyTorch through TorchDistributor has proven to be a solid and effective solution for accelerating deep learning model training on multi-core architectures. The results highlight not only a significant improvement in computational performance, but also the preservation of model quality, paving the way for further exploration on multi-node clusters.
+
