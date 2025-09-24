@@ -160,7 +160,10 @@ def train_loop_fn(config_dict):
     dei dati, l'addestramento e la validazione del modello distribuito.
     """
     # --- Inizializzazione del processo distribuito ---
-    # TorchDistributor imposta le variabili d'ambiente RANK e WORLD_SIZE.
+    # Ogni processo worker riceve il proprio RANK (identificativo univoco) e WORLD_SIZE (numero totale di processi)
+    # da TorchDistributor attraverso le variabili d'ambiente.
+    # - RANK: Identifica univocamente ogni worker (0, 1, 2, ...)
+    # - WORLD_SIZE: Numero totale di processi worker avviati
     rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
 
@@ -170,7 +173,12 @@ def train_loop_fn(config_dict):
 
     # Imposta il device (GPU se disponibile, altrimenti CPU).
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # backend='gloo' è per la comunicazione su CPU, 'nccl' è per GPU
+   # Inizializzazione del gruppo di processi per la comunicazione distribuita
+    # - backend="gloo": Protocollo di comunicazione ottimizzato per CPU
+    #   (usare "nccl" se si utilizzano GPU NVIDIA)
+    # - rank: Identificativo univoco del processo corrente
+    # - world_size: Numero totale di processi nel gruppo
+    # Questo è un punto di sincronizzazione: tutti i processi devono raggiungere questa linea per proseguire
     torch.distributed.init_process_group(backend="gloo", rank=rank, world_size=world_size)
     print(f"Worker {rank}/{world_size} - Using device: {device}")
 
@@ -230,7 +238,13 @@ def train_loop_fn(config_dict):
 
     # --- CREAZIONE DEI DATASET E LOADER ---
     train_dataset = StockDataset(X_train, y_train)
+	# DistributedSampler partiziona i dati in modo che ogni worker riceva un sottoinsieme diverso
+    # - num_replicas: Numero totale di processi (deve corrispondere a world_size)
+    # - rank: Identifica quale partizione dei dati deve essere gestita da questo worker
+    # Ogni epoca, i dati vengono ridistribuiti per garantire che il modello veda tutti i dati
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
+	 # Il DataLoader utilizza il DistributedSampler per caricare solo la partizione di dati assegnata a questo worker
+    # shuffle=False perché lo shuffling è gestito dal DistributedSampler
     train_loader = DataLoader(train_dataset, batch_size=config.BATCH_SIZE, sampler=train_sampler)
     
     val_dataset = StockDataset(X_val, y_val)
@@ -244,7 +258,12 @@ def train_loop_fn(config_dict):
         input_size=config.INPUT_SIZE, hidden_size=config.HIDDEN_SIZE,
         num_layers=config.NUM_LAYERS, output_size=config.OUTPUT_SIZE
     ).to(device)
-    
+
+	# Incapsula il modello con DistributedDataParallel (DDP) per l'addestramento distribuito
+    # DDP si occupa automaticamente di:
+    # 1. Sincronizzare i gradienti tra i processi durante la backward pass
+    # 2. Ridistribuire il modello aggiornato a tutti i processi
+    # device_ids=None perché stiamo usando la CPU (per GPU, specificare gli ID delle GPU)
     model = nn.parallel.DistributedDataParallel(model, device_ids=None)
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
@@ -258,7 +277,11 @@ def train_loop_fn(config_dict):
     train_losses, val_losses = [], []
 
     for epoch in range(config.NUM_EPOCHS):
-        train_sampler.set_epoch(epoch) # Garantisce shuffle corretto in ambiente distribuito
+	    # Imposta l'epoca corrente per il DistributedSampler
+        # Questo garantisce che i dati vengano mescolati in modo diverso ad ogni epoca
+        # e che ogni worker riceva una diversa permutazione dei dati
+        # È fondamentale per evitare che tutti i processi elaborino gli stessi batch in ogni epoca
+        train_sampler.set_epoch(epoch)
         model.train()
         train_loss = 0.0
         for X_batch, y_batch in train_loader:
@@ -271,8 +294,15 @@ def train_loop_fn(config_dict):
             train_loss += loss.item()
 
         # --- Sincronizzazione e Validazione (solo su rank 0) ---
+		# Calcola la loss media su tutti i batch di questo worker
         avg_train_loss_tensor = torch.tensor(train_loss / len(train_loader)).to(device)
+
+	    # all_reduce somma il valore del tensore su tutti i processi
+        # ReduceOp.SUM: somma i valori da tutti i processi
+        # Ogni worker invia la sua loss media e riceve la somma di tutte le loss
         torch.distributed.all_reduce(avg_train_loss_tensor, op=torch.distributed.ReduceOp.SUM)
+
+		#Calcola la los media su tutti i processi
         avg_train_loss = avg_train_loss_tensor.item() / world_size
 
         stop_training = False
@@ -298,9 +328,15 @@ def train_loop_fn(config_dict):
 	            f"Val Loss: {avg_val_loss:.6f}")            
 
         # --- Sincronizzazione tra processi ---
+		# Crea un tensore per comunicare se l'addestramento deve essere interrotto
+        # Viene inviato dal rank 0 a tutti gli altri processi
         stop_training_tensor = torch.tensor(int(stop_training), dtype=torch.int).to(device)
+	    # Broadcast del segnale di stop a tutti i processi
+        # Questo garantisce che tutti i processi si fermino contemporaneamente
         torch.distributed.broadcast(stop_training_tensor, src=0)
-        
+
+		# Se il segnale di stop è attivo, interrompi il ciclo di addestramento
+        # Questo è importante per sincronizzare l'arresto su tutti i processi
         if bool(stop_training_tensor.item()):
             break
 
@@ -321,18 +357,30 @@ def train_loop_fn(config_dict):
         predictions_scaled = torch.cat(predictions_scaled).numpy()
 
         # Inversione dello scaling per riportare le predizioni e i valori reali alla scala originale.
+        # Creazione di array fittizi con la stessa struttura delle feature originali
+        # Questo è necessario perché lo scaler si aspetta lo stesso numero di colonne delle feature originali
         dummy_array_preds = np.zeros((len(predictions_scaled), len(config.FEATURES)))
+		# Inserimento delle predizioni scalate nella colonna corretta (quella del target)
         dummy_array_preds[:, target_idx] = predictions_scaled.flatten()
+		# Applicazione della trasformazione inversa e estrazione della colonna di interesse
         predictions_actual = scaler.inverse_transform(dummy_array_preds)[:, target_idx]
 
+	    # Stesso procedimento per i valori reali del test set
         dummy_array_y = np.zeros((len(y_test), len(config.FEATURES)))
         dummy_array_y[:, target_idx] = y_test.numpy().flatten()
         y_test_actual = scaler.inverse_transform(dummy_array_y)[:, target_idx]
 
-        # Calcolo delle metriche finali
+        # Calcolo delle metriche finali sul test set
+		# Le metriche vengono calcolate solo sul rank 0 per evitare duplicazioni
         metrics = calculate_metrics(y_test_actual, predictions_actual)
         print("\nMetriche di Performance sul Test Set:")
+		# Stampa formattata delle metriche di valutazione
+        # Le metriche includono MSE, RMSE, MAE e MAPE
         for key, value in metrics.items(): print(f"- {key}: {value:.4f}")
+		 # Nota: in un contesto distribuito, queste metriche si riferiscono solo al test set
+         # elaborato dal rank 0, che è sufficiente dato che il modello è stato addestrato
+         # su tutti i dati attraverso la distribuzione del training
+
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M')
         model_name_tag = f"Distributed_MultiStock_{world_size}proc"
@@ -365,6 +413,8 @@ def train_loop_fn(config_dict):
         plt.close()
 
     # Rilascia le risorse del gruppo di processi.
+	# Importante per pulire le risorse di comunicazione e prevenire memory leak
+    # Deve essere chiamato da tutti i processi prima della terminazione
     torch.distributed.destroy_process_group()
 
 # SEZIONE 7: ESECUZIONE TRAMITE SPARK-SUBMIT
