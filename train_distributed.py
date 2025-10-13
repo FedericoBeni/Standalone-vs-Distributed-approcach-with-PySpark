@@ -216,6 +216,7 @@ def train_loop_fn(config_dict):
     test_df_scaled = pd.DataFrame(scaler.transform(test_df[config.FEATURES]), columns=config.FEATURES, index=test_df.index)
     test_df_scaled['Symbol'] = test_df['Symbol']
 
+	# --- CREAZIONE DELLE SEQUENZE TEMPORALI ---
     def create_sequences_from_scaled(df, seq_length, target_idx):
         all_x, all_y = [], []
         for _, group in df.groupby('Symbol'):
@@ -226,7 +227,6 @@ def train_loop_fn(config_dict):
                     all_y.append(group_values[i + seq_length, target_idx])
         return np.array(all_x), np.array(all_y).reshape(-1, 1)
 
-    # --- CREAZIONE DELLE SEQUENZE TEMPORALI ---
     target_idx = config.FEATURES.index(config.TARGET)
     X_train, y_train = create_sequences_from_scaled(train_df_scaled, config.SEQUENCE_LENGTH, target_idx)
     X_val, y_val = create_sequences_from_scaled(val_df_scaled, config.SEQUENCE_LENGTH, target_idx)
