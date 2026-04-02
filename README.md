@@ -55,8 +55,8 @@ Accuracy remains statistically equivalent across configurations
 | Local | 789.16 | — |
 | HDFS | 675.12 | **+14.45%** |
 
-✔ Distributed storage improves I/O performance
+Distributed storage improves I/O performance
 
-## 📂 Dataset
+## Dataset
 
-- S\&P 500 historical stock dataset (Kaggle)
+- [S&P 500 Stock Dataset (Kaggle)](https://www.kaggle.com/datasets/andrewmvd/sp-500-stocks)
