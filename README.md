@@ -33,7 +33,7 @@ Compare training performance of an LSTM model in two configurations:
 | 3 | 894.32 | 2.29x |
 | 4 | 789.16 | **2.60x** |
 
-✔ Distributed training significantly reduces training time
+ istributed training significantly reduces training time
 
 ---
 
@@ -44,7 +44,7 @@ Compare training performance of an LSTM model in two configurations:
 | 1 | 3.54 | 8.58 |
 | 4 | 3.23 | 5.98 |
 
-✔ Accuracy remains statistically equivalent across configurations
+Accuracy remains statistically equivalent across configurations
 
 ---
 
